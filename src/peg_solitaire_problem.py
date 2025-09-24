@@ -280,7 +280,8 @@ def run_experiments(goal: str = 'one',
     Corre BFS, DFS y A* sobre el mismo problema y devuelve una tabla (pandas.DataFrame si está disponible)
     con: Algoritmo, Encontró?, Tiempo (s), Nodos expandidos, Long. solución (movs).
     """
-    algos = ['bfs', 'dfs', 'astar']
+    #algos = ['bfs', 'dfs', 'astar']
+    algos = ['astar']
     rows  = []
 
     for algo in algos:
@@ -342,6 +343,11 @@ if __name__ == "__main__":
 
     print("== Comparativa BFS / DFS / A* ==")
     tabla = run_experiments(goal=GOAL, heuristic_name=H, depth_limit=DLIM, show_path_example=False)
+
+    print("== Solo A* ==")
+    prob = PegSolitaireProblem(goal=GOAL, heuristic_name=H, algorithm='astar', depth_limit=DLIM)
+    res = prob.solve()
+    print(res)
 
     try:
         import pandas as pd  # noqa
