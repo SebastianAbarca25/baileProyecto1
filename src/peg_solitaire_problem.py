@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Iterable, Optional, Dict, Any
 from heapq import heappush, heappop
-import time, sys, collections
+import time, sys
 
 # ──────────────────────────────────────────────
 # Configuración de límites
 # ──────────────────────────────────────────────
-MAX_EXPANSIONS = 50000   # Máximo de nodos expandidos en A*
-TIMEOUT = 15             # Tiempo máximo (segundos) en A*
-PROGRESS_EVERY = 5000    # Cada cuántos nodos imprimir progreso
+MAX_EXPANSIONS = 10_000_000   # Exploración máxima en A*
+TIMEOUT = 900                 # Tiempo máximo (segundos) en A*
+PROGRESS_EVERY = 50000        # Cada cuántos nodos imprimir progreso
 
 # ──────────────────────────────────────────────
 # Representación del tablero
@@ -37,6 +37,21 @@ def english_board() -> Board:
             elif c=='0': row.append(0)
             else: row.append(1)
         b.append(row)
+    return b
+
+# Casos casi resueltos (para demo rápida)
+def almost_solved_center() -> Board:
+    b = [[-1]*7 for _ in range(7)]
+    b[3][1] = 1
+    b[3][2] = 1
+    b[3][3] = 0
+    return b
+
+def almost_solved_any() -> Board:
+    b = [[-1]*7 for _ in range(7)]
+    b[3][2] = 1
+    b[3][3] = 1
+    b[3][4] = 0
     return b
 
 def clone(b: Board) -> Board:
@@ -83,7 +98,6 @@ def reconstruct_path(nodes: List[Node], idx: int) -> List[str]:
     return path
 
 def reconstruct_boards(nodes: List[Node], idx: int) -> List[Board]:
-    """Reconstruye la secuencia de tableros desde el inicio hasta el nodo idx."""
     boards=[]
     while idx is not None:
         n = nodes[idx]
@@ -93,14 +107,29 @@ def reconstruct_boards(nodes: List[Node], idx: int) -> List[Board]:
     return boards
 
 # ──────────────────────────────────────────────
+# Heurísticas
+# ──────────────────────────────────────────────
+def h_pegs(b: Board) -> float:
+    return max(0, count_pegs(b)-1)
+
+def h_center_distance(b: Board) -> float:
+    """Número de fichas + distancia Manhattan al centro (3,3)."""
+    dist = 0
+    for i in range(7):
+        for j in range(7):
+            if b[i][j] == 1:
+                dist += abs(i-3) + abs(j-3)
+    return count_pegs(b) - 1 + 0.5*dist
+
+# ──────────────────────────────────────────────
 # Clase del problema
 # ──────────────────────────────────────────────
 class PegSolitaireProblem:
     def __init__(self,
-                 goal: str = 'one',
-                 heuristic_name: str = 'pegs',
+                 goal: str = 'center',
+                 heuristic_name: str = 'center_dist',
                  algorithm: str = 'astar',
-                 depth_limit: int = 70):
+                 depth_limit: int = 100):
         self.goal = goal
         self.heuristic_name = heuristic_name
         self.algorithm_name = algorithm
@@ -128,9 +157,13 @@ class PegSolitaireProblem:
         return count_pegs(b)==1
 
     def heuristic(self, b: Board) -> float:
-        return max(0, count_pegs(b)-1)
+        if self.heuristic_name == 'pegs':
+            return h_pegs(b)
+        elif self.heuristic_name == 'center_dist':
+            return h_center_distance(b)
+        return 0
 
-    # ───── Algoritmos ─────
+    # DFS
     def dfs(self, start: Optional[Board]=None) -> Dict[str,Any]:
         t0 = time.time()
         if start is None: start = self.initial_state()
@@ -147,7 +180,7 @@ class PegSolitaireProblem:
             if self.is_goal(n.board):
                 best = reconstruct_path(nodes, idx)
                 return True
-            if n.g >= self.depth_limit:
+            if n.g >= self.depth_limit or expanded >= MAX_EXPANSIONS:
                 return False
             key = state_key(n.board)
             seen.add(key)
@@ -171,6 +204,7 @@ class PegSolitaireProblem:
         self.solution_ = res
         return res
 
+    # A*
     def astar(self, start: Optional[Board]=None) -> Dict[str,Any]:
         t0 = time.time()
         if start is None:
@@ -182,7 +216,6 @@ class PegSolitaireProblem:
         best_g: Dict[str,int] = {state_key(start): 0}
 
         while openpq:
-            # ─── Cortes por tiempo y expansiones ───
             if expanded >= MAX_EXPANSIONS or (time.time()-t0) > TIMEOUT:
                 res = {
                     'found': False,
@@ -201,7 +234,6 @@ class PegSolitaireProblem:
             if expanded % PROGRESS_EVERY == 0:
                 print(f"[A*] expanded={expanded}")
 
-            # ─── Meta ───
             if self.is_goal(n.board):
                 path = reconstruct_path(nodes, idx)
                 boards = reconstruct_boards(nodes, idx)
@@ -216,7 +248,6 @@ class PegSolitaireProblem:
                 self.solution_ = res
                 return res
 
-            # ─── Sucesores ───
             for act, nb, cost in self.successors(n.board):
                 g2 = n.g + cost
                 k = state_key(nb)
@@ -226,7 +257,6 @@ class PegSolitaireProblem:
                     f = g2 + self.heuristic(nb)
                     heappush(openpq, (f, len(nodes)-1))
 
-        # Si se vacía la frontera
         res = {'found': False, 'time': round(time.time()-t0,4), 'expanded': expanded}
         self.solution_ = res
         return res
@@ -237,9 +267,9 @@ class PegSolitaireProblem:
 # ──────────────────────────────────────────────
 # Experimentos
 # ──────────────────────────────────────────────
-def run_experiments(goal: str = 'one',
-                    heuristic_name: str = 'pegs',
-                    depth_limit: int = 70):
+def run_experiments(goal: str = 'center',
+                    heuristic_name: str = 'center_dist',
+                    depth_limit: int = 100):
     algos = ['dfs','astar']
     rows  = []
 
@@ -251,13 +281,11 @@ def run_experiments(goal: str = 'one',
         s0   = prob.initial_state()
 
         t0 = time.time()
-        res = {}
         try:
             res = prob.solve(s0)
         except KeyboardInterrupt:
             res = {'found': False}
 
-        # Corte de seguridad: si tardó más de 15s, lo forzamos
         if (time.time()-t0) > TIMEOUT:
             res = {'found': False,
                    'time': round(time.time()-t0,4),
@@ -279,9 +307,9 @@ def run_experiments(goal: str = 'one',
 # Main
 # ──────────────────────────────────────────────
 if __name__ == "__main__":
-    GOAL = 'one'
-    H    = 'pegs'
-    DLIM = 20   # límite DFS bajito
+    GOAL = 'center'        # meta clásica
+    H    = 'center_dist'   # heurística mejorada
+    DLIM = 100             # suficiente para tablero completo
 
     print("== Comparativa DFS / A* ==")
     tabla = run_experiments(goal=GOAL, heuristic_name=H, depth_limit=DLIM)
@@ -294,12 +322,14 @@ if __name__ == "__main__":
         for r in tabla:
             print(r)
 
-    # Ejemplo: mostrar paso a paso si A* encontró solución
-    print("\n== Ejemplo paso a paso con A* ==")
-    prob = PegSolitaireProblem(goal=GOAL, heuristic_name=H, algorithm='astar')
-    res = prob.solve()
-    if res.get('found'):
-        for step, board in enumerate(res['boards']):
+    # Ejemplo rápido garantizado
+   
+    print("\n== Solución completa desde tablero inicial (si se encuentra) ==")
+    prob_full = PegSolitaireProblem(goal='center', heuristic_name=H, algorithm='astar')
+    res_full = prob_full.solve(prob_full.initial_state())
+    if res_full.get('found'):
+        print("Movimientos totales:", len(res_full['path']))
+        for step, board in enumerate(res_full['boards']):
             print(f"\nPaso {step}:\n{board_str(board)}")
     else:
-        print("A* no alcanzó la meta en los límites dados.")
+        print("No se encontró solución completa en los límites dados.")
